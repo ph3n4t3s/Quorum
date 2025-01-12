@@ -1,0 +1,1482 @@
+# Solutions des exercices sur les patrons de conception
+
+## Introduction
+
+Ce document présente les solutions pour quatre exercices mettant en pratique différents patrons de conception en Quorum. Chaque solution est accompagnée d'explications détaillées et de guides de bonnes pratiques.
+
+## 1. Système de Journalisation (Patron Singleton)
+
+### Description
+Implémentation d'un système de journalisation centralisé utilisant le patron Singleton pour garantir une instance unique à travers l'application.
+
+### Solution
+
+```quorum
+/*
+ * Système de journalisation avec Singleton
+ * Fournit une instance unique pour la gestion centralisée des logs
+ */
+
+class Journal
+    // Instance unique
+    private static Journal instance = undefined
+    
+    // Configuration
+    private text CHEMIN_FICHIER = "application.log"
+    private integer TAILLE_MAX = 5 * 1024 * 1024  // 5 Mo
+    
+    // Variables d'instance
+    private File fichierLog
+    private integer compteurEntrees = 0
+    private text dernierNiveau = ""
+    
+    // Niveaux de log standards
+    public static text INFO = "INFO"
+    public static text AVERTISSEMENT = "AVERTISSEMENT"
+    public static text ERREUR = "ERREUR"
+    public static text DEBUG = "DEBUG"
+    
+    // Constructeur privé
+    private action Journal
+        fichierLog = InitialiserFichier()
+    end
+    
+    // Point d'accès global
+    public static action GetInstance returns Journal
+        if instance = undefined
+            instance = new Journal()
+        end
+        return instance
+    end
+    
+    // Initialisation du fichier
+    private action InitialiserFichier returns File
+        File fichier
+        fichier:SetPath(CHEMIN_FICHIER)
+        
+        if not fichier:Exists()
+            text entete = GenererEntete()
+            fichier:Write(entete)
+        end
+        
+        return fichier
+    end
+    
+    // Génère l'en-tête du fichier journal
+    private action GenererEntete returns text
+        text entete = "=== Journal d'Application ===\n"
+        entete = entete + "Date de création : " + ObtenirDateHeure() + "\n"
+        entete = entete + "Format : [TIMESTAMP] [NIVEAU] Message\n"
+        entete = entete + "========================\n\n"
+        return entete
+    end
+    
+    // Écriture d'une entrée de journal
+    public action Log(text message, text niveau)
+        VerifierRotation()
+        
+        text entree = FormaterEntree(message, niveau)
+        EcrireEntree(entree)
+        
+        compteurEntrees = compteurEntrees + 1
+        dernierNiveau = niveau
+    end
+    
+    // Formate une entrée de journal
+    private action FormaterEntree(text message, text niveau) returns text
+        text timestamp = ObtenirDateHeure()
+        return "[" + timestamp + "] [" + niveau + "] " + message + "\n"
+    end
+    
+    // Écrit une entrée dans le fichier
+    private action EcrireEntree(text entree)
+        try
+            text contenuActuel = fichierLog:Read()
+            fichierLog:Write(contenuActuel + entree)
+        catch Error e
+            output "Erreur d'écriture dans le journal : " + e:GetMessage()
+        end
+    end
+    
+    // Vérifie et gère la rotation des fichiers
+    private action VerifierRotation
+        if fichierLog:GetSize() > TAILLE_MAX
+            FaireRotation()
+        end
+    end
+    
+    // Effectue la rotation du fichier journal
+    private action FaireRotation
+        text nouveauChemin = CHEMIN_FICHIER + "." + ObtenirDateHeure()
+        
+        try
+            // Sauvegarde du fichier actuel
+            fichierLog:CopyTo(nouveauChemin)
+            
+            // Réinitialisation du fichier principal
+            fichierLog:Write(GenererEntete())
+            
+            // Log de la rotation
+            Log("Rotation du fichier journal effectuée", INFO)
+        catch Error e
+            output "Erreur lors de la rotation du journal : " + e:GetMessage()
+        end
+    end
+    
+    // Obtient l'horodatage actuel formaté
+    private action ObtenirDateHeure returns text
+        DateTime maintenant
+        return maintenant:Format("yyyy-MM-dd HH:mm:ss")
+    end
+    
+    // Méthodes pratiques pour les différents niveaux de log
+    public action LogInfo(text message)
+        Log(message, INFO)
+    end
+    
+    public action LogAvertissement(text message)
+        Log(message, AVERTISSEMENT)
+    end
+    
+    public action LogErreur(text message)
+        Log(message, ERREUR)
+    end
+    
+    public action LogDebug(text message)
+        Log(message, DEBUG)
+    end
+    
+    // Statistiques et informations
+    public action GetCompteurEntrees returns integer
+        return compteurEntrees
+    end
+    
+    public action GetDernierNiveau returns text
+        return dernierNiveau
+    end
+end
+
+// Exemple d'utilisation du système de journalisation
+class ExempleJournal
+    action Main
+        // Obtention de l'instance du journal
+        Journal journal = Journal:GetInstance()
+        
+        // Exemples d'utilisation
+        journal:LogInfo("Application démarrée")
+        journal:LogDebug("Initialisation des composants")
+        journal:LogAvertissement("Espace disque faible")
+        journal:LogErreur("Échec de connexion à la base de données")
+        
+        // Utilisation depuis un autre endroit du code
+        Journal autreAcces = Journal:GetInstance()
+        autreAcces:LogInfo("Test d'unicité du Singleton")
+        
+        // Affichage des statistiques
+        output "Nombre total d'entrées : " + journal:GetCompteurEntrees()
+        output "Dernier niveau utilisé : " + journal:GetDernierNiveau()
+    end
+end
+```
+
+### Points Clés
+1. **Instance Unique** : Utilisation du patron Singleton pour garantir une instance unique
+2. **Gestion des Ressources** : Rotation automatique des fichiers basée sur la taille
+3. **Format Standard** : Format cohérent des entrées de journal
+4. **Niveaux de Log** : Support de différents niveaux de gravité
+5. **Robustesse** : Gestion des erreurs et des cas limites
+
+### Améliorations Possibles
+- Ajout de filtres de niveau de log
+- Support de plusieurs destinations de log
+- Compression des fichiers archivés
+- Configuration via un fichier externe
+
+## 2. Système de Plugins (Patron Fabrique)
+
+### Description
+Implémentation d'un système de plugins extensible utilisant le patron Fabrique pour la création dynamique de plugins.
+
+### Solution
+
+```quorum
+/*
+ * Système de plugins avec le patron Fabrique
+ * Permet l'ajout dynamique de nouvelles fonctionnalités
+ */
+
+// Interface de base pour tous les plugins
+interface Plugin
+    action GetNom returns text
+    action GetDescription returns text
+    action GetVersion returns text
+    action EstActif returns boolean
+    action Executer(text[] parametres)
+    action Initialiser
+    action Terminer
+end
+
+// Interface pour la configuration des plugins
+interface ConfigurationPlugin
+    action GetParametres returns text[]
+    action SetParametre(text nom, text valeur)
+    action GetParametre(text nom) returns text
+    action Valider returns boolean
+end
+
+// Classe de base pour les plugins
+class PluginBase is Plugin, ConfigurationPlugin
+    private text nom = ""
+    private text description = ""
+    private text version = "1.0"
+    private boolean actif = true
+    private HashMap<text, text> parametres
+    
+    action PluginBase(text nom, text description)
+        me:nom = nom
+        me:description = description
+        parametres = new HashMap<text, text>()
+    end
+    
+    // Implémentation de Plugin
+    action GetNom returns text
+        return nom
+    end
+    
+    action GetDescription returns text
+        return description
+    end
+    
+    action GetVersion returns text
+        return version
+    end
+    
+    action EstActif returns boolean
+        return actif
+    end
+    
+    action Initialiser
+        // Par défaut ne fait rien
+    end
+    
+    action Terminer
+        // Par défaut ne fait rien
+    end
+    
+    // Implémentation de ConfigurationPlugin
+    action GetParametres returns text[]
+        Array<text> cles
+        Iterator<text> it = parametres:GetKeyIterator()
+        repeat while it:HasNext()
+            cles:Add(it:Next())
+        end
+        return cles:ToArray()
+    end
+    
+    action SetParametre(text nom, text valeur)
+        parametres:Add(nom, valeur)
+    end
+    
+    action GetParametre(text nom) returns text
+        if parametres:HasKey(nom)
+            return parametres:GetValue(nom)
+        end
+        return undefined
+    end
+    
+    action Valider returns boolean
+        // Par défaut valide
+        return true
+    end
+end
+
+// Fabrique de plugins
+class FabriquePlugins
+    private static HashMap<text, Plugin> plugins
+    
+    action FabriquePlugins
+        plugins = new HashMap<text, Plugin>()
+        EnregistrerPluginsParDefaut()
+    end
+    
+    private action EnregistrerPluginsParDefaut
+        // Plugins standard
+        EnregistrerPlugin(new PluginTraitementTexte())
+        EnregistrerPlugin(new PluginCompression())
+        EnregistrerPlugin(new PluginAnalyse())
+    end
+    
+    public action EnregistrerPlugin(Plugin plugin)
+        plugins:Add(plugin:GetNom(), plugin)
+    end
+    
+    public action CreerPlugin(text nom) returns Plugin
+        if plugins:HasKey(nom)
+            return plugins:GetValue(nom)
+        end
+        return undefined
+    end
+    
+    public action GetPluginsDisponibles returns Array<Plugin>
+        Array<Plugin> listePlugins
+        Iterator<Plugin> it = plugins:GetValueIterator()
+        repeat while it:HasNext()
+            listePlugins:Add(it:Next())
+        end
+        return listePlugins
+    end
+end
+
+// Exemple de plugin de traitement de texte
+class PluginTraitementTexte is PluginBase
+    action PluginTraitementTexte
+        parent:PluginBase("TextProcessor", "Plugin de traitement de texte")
+        SetParametre("encodage", "UTF-8")
+        SetParametre("modeTraitement", "standard")
+    end
+    
+    action Executer(text[] parametres)
+        // Implémentation spécifique
+    end
+end
+
+// Exemple de plugin de compression
+class PluginCompression is PluginBase
+    action PluginCompression
+        parent:PluginBase("Compressor", "Plugin de compression de fichiers")
+        SetParametre("niveau", "9")
+        SetParametre("algorithme", "gzip")
+    end
+    
+    action Executer(text[] parametres)
+        // Implémentation spécifique
+    end
+end
+
+// Exemple de plugin d'analyse
+class PluginAnalyse is PluginBase
+    action PluginAnalyse
+        parent:PluginBase("Analyzer", "Plugin d'analyse de données")
+        SetParametre("profondeur", "3")
+        SetParametre("mode", "complet")
+    end
+    
+    action Executer(text[] parametres)
+        // Implémentation spécifique
+    end
+end
+
+// Exemple d'utilisation du système de plugins
+class ExemplePlugins
+    action Main
+        // Création de la fabrique
+        FabriquePlugins fabrique = new FabriquePlugins()
+        
+        // Affichage des plugins disponibles
+        Array<Plugin> plugins = fabrique:GetPluginsDisponibles()
+        output "Plugins disponibles :"
+        
+        integer i = 0
+        repeat while i < plugins:GetSize()
+            Plugin plugin = plugins:Get(i)
+            output "- " + plugin:GetNom() + " (" + plugin:GetVersion() + ")"
+            output "  Description : " + plugin:GetDescription()
+            
+            // Affichage des paramètres
+            text[] parametres = cast(ConfigurationPlugin, plugin):GetParametres()
+            if parametres:GetSize() > 0
+                output "  Paramètres :"
+                integer j = 0
+                repeat while j < parametres:GetSize()
+                    text param = parametres[j]
+                    text valeur = cast(ConfigurationPlugin, plugin):GetParametre(param)
+                    output "    " + param + " = " + valeur
+                    j = j + 1
+                end
+            end
+            
+            output ""
+            i = i + 1
+        end
+        
+        // Utilisation d'un plugin spécifique
+        Plugin plugin = fabrique:CreerPlugin("TextProcessor")
+        if plugin not= undefined and plugin:EstActif()
+            plugin:Initialiser()
+            plugin:Executer({"fichier.txt", "sortie.txt"})
+            plugin:Terminer()
+        end
+    end
+end
+```
+
+### Points Clés
+1. **Extensibilité** : Système facilement extensible avec de nouveaux plugins
+2. **Configuration** : Support de paramètres configurables par plugin
+3. **Cycle de Vie** : Gestion du cycle de vie des plugins (initialisation, exécution, terminaison)
+4. **Validation** : Validation des paramètres et de l'état des plugins
+5. **Découplage** : Séparation claire entre l'interface et l'implémentation
+
+### Améliorations Possibles
+- Chargement dynamique depuis des fichiers externes
+- Gestion des dépendances entre plugins
+- Système de version plus élaboré
+- Support d'activation/désactivation dynamique
+
+## 3. Éditeur de Texte (Patron Commande)
+
+### Description
+Implémentation d'un éditeur de texte avec support d'annulation/rétablissement utilisant le patron Commande.
+
+### Solution
+
+```quorum
+/*
+ * Éditeur de texte avec le patron Commande
+ * Permet l'annulation et le rétablissement des actions
+ */
+
+// Interface de base pour toutes les commandes
+interface Commande
+    action Executer
+    action Annuler
+    action GetDescription returns text
+end
+
+// Classe représentant le document texte
+class Document
+    private text contenu = ""
+
+    action GetContenu returns text
+        return contenu
+    end
+
+    action SetContenu(text nouveauContenu)
+        contenu = nouveauContenu
+    end
+
+    action Inserer(text texte, integer position)
+        if position >= 0 and position <= contenu:GetLength()
+            contenu = contenu:SubText(0, position) + texte + 
+                     contenu:SubText(position)
+        end
+    end
+
+    action Supprimer(integer debut, integer fin)
+        if debut >= 0 and fin <= contenu:GetLength() and debut <= fin
+            contenu = contenu:SubText(0, debut) + 
+                     contenu:SubText(fin)
+        end
+    end
+
+    action Remplacer(text ancien, text nouveau)
+        contenu = contenu:Replace(ancien, nouveau)
+    end
+
+    action GetTaille returns integer
+        return contenu:GetLength()
+    end
+end
+
+// Commande d'insertion de texte
+class CommandeInsertion is Commande
+    private Document document
+    private text texte
+    private integer position
+
+    action CommandeInsertion(Document document, text texte, integer position)
+        me:document = document
+        me:texte = texte
+        me:position = position
+    end
+
+    action Executer
+        document:Inserer(texte, position)
+    end
+
+    action Annuler
+        document:Supprimer(position, position + texte:GetLength())
+    end
+
+    action GetDescription returns text
+        return "Insertion de texte à la position " + position
+    end
+end
+
+// Commande de suppression de texte
+class CommandeSuppression is Commande
+    private Document document
+    private text texteSuprime
+    private integer position
+
+    action CommandeSuppression(Document document, integer debut, integer fin)
+        me:document = document
+        me:position = debut
+        me:texteSuprime = document:GetContenu():SubText(debut, fin)
+    end
+
+    action Executer
+        document:Supprimer(position, position + texteSuprime:GetLength())
+    end
+
+    action Annuler
+        document:Inserer(texteSuprime, position)
+    end
+
+    action GetDescription returns text
+        return "Suppression de texte à la position " + position
+    end
+end
+
+// Commande de remplacement de texte
+class CommandeRemplacement is Commande
+    private Document document
+    private text ancien
+    private text nouveau
+    private Array<integer> positions
+
+    action CommandeRemplacement(Document document, text ancien, text nouveau)
+        me:document = document
+        me:ancien = ancien
+        me:nouveau = nouveau
+        me:positions = TrouverPositions(ancien)
+    end
+
+    action Executer
+        document:Remplacer(ancien, nouveau)
+    end
+
+    action Annuler
+        document:Remplacer(nouveau, ancien)
+    end
+
+    private action TrouverPositions(text recherche) returns Array<integer>
+        Array<integer> resultat
+        text contenu = document:GetContenu()
+        integer position = contenu:IndexOf(recherche)
+
+        repeat while position >= 0
+            resultat:Add(position)
+            position = contenu:IndexOf(recherche, position + 1)
+        end
+
+        return resultat
+    end
+
+    action GetDescription returns text
+        return "Remplacement de '" + ancien + "' par '" + nouveau + "'"
+    end
+end
+
+// Gestionnaire de commandes avec historique
+class GestionnaireCommandes
+    private Stack<Commande> historique
+    private Stack<Commande> annulations
+    private integer limiteHistorique
+
+    action GestionnaireCommandes(integer limite)
+        historique = new Stack<Commande>()
+        annulations = new Stack<Commande>()
+        limiteHistorique = limite
+    end
+
+    action ExecuterCommande(Commande commande)
+        commande:Executer()
+        historique:Push(commande)
+        annulations:Clear()
+
+        // Vérifier la limite de l'historique
+        if historique:GetSize() > limiteHistorique
+            historique:RemoveAt(0)
+        end
+    end
+
+    action Annuler
+        if not historique:IsEmpty()
+            Commande commande = historique:Pop()
+            commande:Annuler()
+            annulations:Push(commande)
+        end
+    end
+
+    action Retablir
+        if not annulations:IsEmpty()
+            Commande commande = annulations:Pop()
+            commande:Executer()
+            historique:Push(commande)
+        end
+    end
+
+    action GetHistorique returns Array<text>
+        Array<text> descriptions
+        Stack<Commande> copie = historique:Copy()
+
+        repeat while not copie:IsEmpty()
+            Commande cmd = copie:Pop()
+            descriptions:Add(cmd:GetDescription())
+        end
+
+        return descriptions
+    end
+end
+
+// Éditeur de texte principal
+class Editeur
+    private Document document
+    private GestionnaireCommandes gestionnaire
+
+    action Editeur
+        document = new Document()
+        gestionnaire = new GestionnaireCommandes(50)  // Limite de 50 actions
+    end
+
+    action InsererTexte(text texte, integer position)
+        Commande commande = new CommandeInsertion(document, texte, position)
+        gestionnaire:ExecuterCommande(commande)
+    end
+
+    action SupprimerTexte(integer debut, integer fin)
+        Commande commande = new CommandeSuppression(document, debut, fin)
+        gestionnaire:ExecuterCommande(commande)
+    end
+
+    action RemplacerTexte(text ancien, text nouveau)
+        Commande commande = new CommandeRemplacement(document, ancien, nouveau)
+        gestionnaire:ExecuterCommande(commande)
+    end
+
+    action Annuler
+        gestionnaire:Annuler()
+    end
+
+    action Retablir
+        gestionnaire:Retablir()
+    end
+
+    action GetContenu returns text
+        return document:GetContenu()
+    end
+
+    action AfficherHistorique
+        output "\nHistorique des commandes :"
+        Array<text> historique = gestionnaire:GetHistorique()
+        integer i = historique:GetSize() - 1
+
+        repeat while i >= 0
+            output (i + 1) + ". " + historique:Get(i)
+            i = i - 1
+        end
+    end
+end
+
+// Exemple d'utilisation de l'éditeur
+class ExempleEditeur
+    action Main
+        Editeur editeur = new Editeur()
+
+        // Test des différentes commandes
+        editeur:InsererTexte("Bonjour ", 0)
+        editeur:InsererTexte("monde!", 7)
+        output "Texte initial : " + editeur:GetContenu()
+
+        editeur:RemplacerTexte("monde", "univers")
+        output "Après remplacement : " + editeur:GetContenu()
+
+        editeur:SupprimerTexte(7, 14)
+        output "Après suppression : " + editeur:GetContenu()
+
+        editeur:Annuler()  // Annule la suppression
+        output "Après annulation : " + editeur:GetContenu()
+
+        editeur:Retablir() // Rétablit la suppression
+        output "Après rétablissement : " + editeur:GetContenu()
+
+        // Affichage de l'historique
+        editeur:AfficherHistorique()
+    end
+end
+```
+
+### Points Clés
+1. **Encapsulation des Actions** : Chaque action est encapsulée dans une commande
+2. **Historique** : Gestion complète de l'historique des commandes
+3. **Annulation/Rétablissement** : Support complet des fonctionnalités undo/redo
+4. **Flexibilité** : Facilité d'ajout de nouvelles commandes
+5. **Limite d'Historique** : Gestion de la mémoire avec une limite configurable
+
+### Améliorations Possibles
+- Support des commandes composites
+- Persistance de l'historique
+- Commandes asynchrones
+- Gestion des conflits
+
+## 4. Système de Notifications (Patron Observateur)
+
+### Description
+Implémentation d'un système de notifications flexible utilisant le patron Observateur pour la diffusion d'événements.
+
+### Solution
+
+```quorum
+/*
+ * Système de notifications avec le patron Observateur
+ * Permet la diffusion d'événements à plusieurs observateurs
+ */
+
+// Type énuméré pour les niveaux de priorité
+class PrioriteNotification
+    public static text BASSE = "BASSE"
+    public static text NORMALE = "NORMALE"
+    public static text HAUTE = "HAUTE"
+    public static text URGENTE = "URGENTE"
+end
+
+// Classe représentant une notification
+class Notification
+    private text type
+    private text message
+    private text priorite
+    private DateTime horodatage
+
+    action Notification(text type, text message, text priorite)
+        me:type = type
+        me:message = message
+        me:priorite = priorite
+        me:horodatage = now
+    end
+
+    action GetType returns text
+        return type
+    end
+
+    action GetMessage returns text
+        return message
+    end
+
+    action GetPriorite returns text
+        return priorite
+    end
+
+    action GetHorodatage returns DateTime
+        return horodatage
+    end
+end
+
+// Interface pour les observateurs
+interface Observateur
+    action Notifier(Notification notification)
+    action GetIdentifiant returns text
+end
+
+// Interface pour les sujets observables
+interface Sujet
+    action AjouterObservateur(Observateur observateur)
+    action RetirerObservateur(Observateur observateur)
+    action NotifierObservateurs(Notification notification)
+end
+
+// Gestionnaire de notifications principal
+class GestionnaireNotifications is Sujet
+    private Array<Observateur> observateurs
+    private Array<Notification> historiqueNotifications
+    private integer capaciteHistorique
+    private HashMap<text, text> configurations
+
+    action GestionnaireNotifications
+        observateurs = new Array<Observateur>()
+        historiqueNotifications = new Array<Notification>()
+        capaciteHistorique = 100
+        configurations = new HashMap<text, text>()
+        InitialiserConfigurations()
+    end
+
+    private action InitialiserConfigurations
+        configurations:Add("seuil_priorite", PrioriteNotification:BASSE)
+        configurations:Add("historique_actif", "true")
+    end
+
+    action AjouterObservateur(Observateur observateur)
+        if not ObservateurExiste(observateur:GetIdentifiant())
+            observateurs:Add(observateur)
+        end
+    end
+
+    action RetirerObservateur(Observateur observateur)
+        integer i = 0
+        repeat while i < observateurs:GetSize()
+            if observateurs:Get(i):GetIdentifiant() = observateur:GetIdentifiant()
+                observateurs:RemoveAt(i)
+                return
+            end
+            i = i + 1
+        end
+    end
+
+    action NotifierObservateurs(Notification notification)
+        // Vérification du seuil de priorité
+        if DoitTraiterNotification(notification)
+            // Notification des observateurs
+            integer i = 0
+            repeat while i < observateurs:GetSize()
+                observateurs:Get(i):Notifier(notification)
+                i = i + 1
+            end
+
+            // Ajout à l'historique si activé
+            if configurations:GetValue("historique_actif") = "true"
+                AjouterHistorique(notification)
+            end
+        end
+    end
+
+    private action ObservateurExiste(text identifiant) returns boolean
+        integer i = 0
+        repeat while i < observateurs:GetSize()
+            if observateurs:Get(i):GetIdentifiant() = identifiant
+                return true
+            end
+            i = i + 1
+        end
+        return false
+    end
+
+    private action DoitTraiterNotification(Notification notification) returns boolean
+        text seuilPriorite = configurations:GetValue("seuil_priorite")
+        return PrioriteSuperieure(notification:GetPriorite(), seuilPriorite)
+    end
+
+    private action PrioriteSuperieure(text p1, text p2) returns boolean
+        Array<text> ordre
+        ordre:Add(PrioriteNotification:BASSE)
+        ordre:Add(PrioriteNotification:NORMALE)
+        ordre:Add(PrioriteNotification:HAUTE)
+        ordre:Add(PrioriteNotification:URGENTE)
+
+        integer index1 = ordre:IndexOf(p1)
+        integer index2 = ordre:IndexOf(p2)
+
+        return index1 >= index2
+    end
+
+    private action AjouterHistorique(Notification notification)
+        historiqueNotifications:Add(notification)
+
+        // Maintien de la capacité maximale
+        if historiqueNotifications:GetSize() > capaciteHistorique
+            historiqueNotifications:RemoveAt(0)
+        end
+    end
+
+    // Configuration du gestionnaire
+    action SetConfiguration(text cle, text valeur)
+        if configurations:HasKey(cle)
+            configurations:Add(cle, valeur)
+        end
+    end
+
+    action GetHistorique returns Array<Notification>
+        return historiqueNotifications
+    end
+end
+
+// Implémentations d'observateurs
+
+// Observateur console
+class ObservateurConsole is Observateur
+    private text identifiant
+
+    action ObservateurConsole(text identifiant)
+        me:identifiant = identifiant
+    end
+
+    action Notifier(Notification notification)
+        output "[" + notification:GetHorodatage():GetText() + "] "
+        output "[" + notification:GetPriorite() + "] "
+        output notification:GetType() + ": " + notification:GetMessage()
+    end
+
+    action GetIdentifiant returns text
+        return identifiant
+    end
+end
+
+// Observateur fichier
+class ObservateurFichier is Observateur
+    private text identifiant
+    private File fichierLog
+
+    action ObservateurFichier(text identifiant, text cheminFichier)
+        me:identifiant = identifiant
+        fichierLog:SetPath(cheminFichier)
+    end
+
+    action Notifier(Notification notification)
+        try
+            text contenuActuel = fichierLog:Read()
+            text entree = FormatEntree(notification)
+            fichierLog:Write(contenuActuel + entree + "\n")
+        catch Error e
+            output "Erreur d'écriture dans le fichier : " + e:GetMessage()
+        end
+    end
+
+    private action FormatEntree(Notification notification) returns text
+        text entree = notification:GetHorodatage():GetText()
+        entree = entree + " | " + notification:GetPriorite()
+        entree = entree + " | " + notification:GetType()
+        entree = entree + " | " + notification:GetMessage()
+        return entree
+    end
+
+    action GetIdentifiant returns text
+        return identifiant
+    end
+end
+
+// Observateur email
+class ObservateurEmail is Observateur
+    private text identifiant
+    private text adresseEmail
+    private text seuilPriorite
+
+    action ObservateurEmail(text identifiant, text adresseEmail, text seuilPriorite)
+        me:identifiant = identifiant
+        me:adresseEmail = adresseEmail
+        me:seuilPriorite = seuilPriorite
+    end
+
+    action Notifier(Notification notification)
+        if DoitEnvoyerEmail(notification)
+            // Simulation d'envoi d'email
+            output "Email envoyé à " + adresseEmail + ":"
+            output "Sujet: " + notification:GetType()
+            output "Corps: " + notification:GetMessage()
+        end
+    end
+
+    private action DoitEnvoyerEmail(Notification notification) returns boolean
+        return notification:GetPriorite() = seuilPriorite or 
+               notification:GetPriorite() = PrioriteNotification:URGENTE
+    end
+
+    action GetIdentifiant returns text
+        return identifiant
+    end
+end
+
+// Exemple d'utilisation du système de notifications
+class ExempleNotifications
+    action Main
+        // Création du gestionnaire de notifications
+        GestionnaireNotifications gestionnaire = new GestionnaireNotifications()
+
+        // Création des observateurs
+        ObservateurConsole obsConsole = new ObservateurConsole("console1")
+        ObservateurFichier obsFichier = new ObservateurFichier("fichier1", "notifications.log")
+        ObservateurEmail obsEmail = new ObservateurEmail("email1", "admin@exemple.com", PrioriteNotification:HAUTE)
+
+        // Ajout des observateurs
+        gestionnaire:AjouterObservateur(obsConsole)
+        gestionnaire:AjouterObservateur(obsFichier)
+        gestionnaire:AjouterObservateur(obsEmail)
+
+        // Test des notifications avec différentes priorités
+        Notification notifBasse = new Notification(
+            "SYSTEME",
+            "Sauvegarde automatique effectuée",
+            PrioriteNotification:BASSE
+        )
+        gestionnaire:NotifierObservateurs(notifBasse)
+
+        Notification notifUrgente = new Notification(
+            "ALERTE",
+            "Espace disque critique",
+            PrioriteNotification:URGENTE
+        )
+        gestionnaire:NotifierObservateurs(notifUrgente)
+
+        // Test de retrait d'un observateur
+        gestionnaire:RetirerObservateur(obsConsole)
+
+        Notification notifNormale = new Notification(
+            "INFO",
+            "Test après retrait d'observateur",
+            PrioriteNotification:NORMALE
+        )
+        gestionnaire:NotifierObservateurs(notifNormale)
+
+        // Affichage de l'historique
+        output "\nHistorique des notifications :"
+        Array<Notification> historique = gestionnaire:GetHistorique()
+        integer i = 0
+        repeat while i < historique:GetSize()
+            Notification notif = historique:Get(i)
+            output (i + 1) + ". [" + notif:GetPriorite() + "] " + 
+                   notif:GetType() + ": " + notif:GetMessage()
+            i = i + 1
+        end
+    end
+end
+```
+
+### Points Clés
+1. **Découplage** : Séparation entre les sources de notifications et les observateurs
+2. **Flexibilité** : Facilité d'ajout/retrait d'observateurs
+3. **Priorités** : Gestion des niveaux de priorité des notifications
+4. **Historique** : Maintien d'un historique configurable
+5. **Types d'Observateurs** : Support de différents types de destinations (console, fichier, email)
+
+### Améliorations Possibles
+1. **Performance**
+   - Notifications asynchrones
+   - Mise en file d'attente des notifications
+   - Optimisation de l'historique
+
+2. **Fonctionnalités**
+   - Filtrage plus avancé des notifications
+   - Support de patterns de notification complexes
+   - Notifications programmées
+   - Groupement de notifications
+
+3. **Observateurs**
+   - Support de webhooks
+   - Notifications push mobile
+   - Intégration avec des services externes
+   - Observateurs conditionnels
+
+4. **Gestion**
+   - Interface d'administration
+   - Statistiques de notifications
+   - Export/Import de configurations
+   - Backup des notifications importantes
+
+Ces solutions illustrent les concepts fondamentaux des patrons de conception et fournissent une base solide pour des implémentations plus avancées. Les patrons peuvent être combinés et adaptés selon les besoins spécifiques de l'application.
+
+Exemples de combinaisons possibles :
+- Singleton + Observateur pour un système de journalisation global
+- Fabrique + Commande pour un système de plugins avec actions annulables
+- Observateur + Commande pour un système d'audit des actions
+- Singleton + Fabrique pour un gestionnaire de ressources centralisé# Solutions des Exercices sur les Patrons de Conception
+
+## Introduction
+
+Ce document présente les solutions pour quatre exercices mettant en pratique différents patrons de conception en Quorum. Chaque solution est accompagnée d'explications détaillées et de guides de bonnes pratiques.
+
+## 1. Système de Journalisation (Patron Singleton)
+
+### Description
+Implémentation d'un système de journalisation centralisé utilisant le patron Singleton pour garantir une instance unique à travers l'application.
+
+### Solution
+
+```quorum
+/*
+ * Système de journalisation avec Singleton
+ * Fournit une instance unique pour la gestion centralisée des logs
+ */
+
+class Journal
+    // Instance unique
+    private static Journal instance = undefined
+
+    // Configuration
+    private text CHEMIN_FICHIER = "application.log"
+    private integer TAILLE_MAX = 5 * 1024 * 1024  // 5 Mo
+
+    // Variables d'instance
+    private File fichierLog
+    private integer compteurEntrees = 0
+    private text dernierNiveau = ""
+
+    // Niveaux de log standards
+    public static text INFO = "INFO"
+    public static text AVERTISSEMENT = "AVERTISSEMENT"
+    public static text ERREUR = "ERREUR"
+    public static text DEBUG = "DEBUG"
+
+    // Constructeur privé
+    private action Journal
+        fichierLog = InitialiserFichier()
+    end
+
+    // Point d'accès global
+    public static action GetInstance returns Journal
+        if instance = undefined
+            instance = new Journal()
+        end
+        return instance
+    end
+
+    // Initialisation du fichier
+    private action InitialiserFichier returns File
+        File fichier
+        fichier:SetPath(CHEMIN_FICHIER)
+
+        if not fichier:Exists()
+            text entete = GenererEntete()
+            fichier:Write(entete)
+        end
+
+        return fichier
+    end
+
+    // Génère l'en-tête du fichier journal
+    private action GenererEntete returns text
+        text entete = "=== Journal d'Application ===\n"
+        entete = entete + "Date de création : " + ObtenirDateHeure() + "\n"
+        entete = entete + "Format : [TIMESTAMP] [NIVEAU] Message\n"
+        entete = entete + "========================\n\n"
+        return entete
+    end
+
+    // Écriture d'une entrée de journal
+    public action Log(text message, text niveau)
+        VerifierRotation()
+
+        text entree = FormaterEntree(message, niveau)
+        EcrireEntree(entree)
+
+        compteurEntrees = compteurEntrees + 1
+        dernierNiveau = niveau
+    end
+
+    // Formate une entrée de journal
+    private action FormaterEntree(text message, text niveau) returns text
+        text timestamp = ObtenirDateHeure()
+        return "[" + timestamp + "] [" + niveau + "] " + message + "\n"
+    end
+
+    // Écrit une entrée dans le fichier
+    private action EcrireEntree(text entree)
+        try
+            text contenuActuel = fichierLog:Read()
+            fichierLog:Write(contenuActuel + entree)
+        catch Error e
+            output "Erreur d'écriture dans le journal : " + e:GetMessage()
+        end
+    end
+
+    // Vérifie et gère la rotation des fichiers
+    private action VerifierRotation
+        if fichierLog:GetSize() > TAILLE_MAX
+            FaireRotation()
+        end
+    end
+
+    // Effectue la rotation du fichier journal
+    private action FaireRotation
+        text nouveauChemin = CHEMIN_FICHIER + "." + ObtenirDateHeure()
+
+        try
+            // Sauvegarde du fichier actuel
+            fichierLog:CopyTo(nouveauChemin)
+
+            // Réinitialisation du fichier principal
+            fichierLog:Write(GenererEntete())
+
+            // Log de la rotation
+            Log("Rotation du fichier journal effectuée", INFO)
+        catch Error e
+            output "Erreur lors de la rotation du journal : " + e:GetMessage()
+        end
+    end
+
+    // Obtient l'horodatage actuel formaté
+    private action ObtenirDateHeure returns text
+        DateTime maintenant
+        return maintenant:Format("yyyy-MM-dd HH:mm:ss")
+    end
+
+    // Méthodes pratiques pour les différents niveaux de log
+    public action LogInfo(text message)
+        Log(message, INFO)
+    end
+
+    public action LogAvertissement(text message)
+        Log(message, AVERTISSEMENT)
+    end
+
+    public action LogErreur(text message)
+        Log(message, ERREUR)
+    end
+
+    public action LogDebug(text message)
+        Log(message, DEBUG)
+    end
+
+    // Statistiques et informations
+    public action GetCompteurEntrees returns integer
+        return compteurEntrees
+    end
+
+    public action GetDernierNiveau returns text
+        return dernierNiveau
+    end
+end
+
+// Exemple d'utilisation du système de journalisation
+class ExempleJournal
+    action Main
+        // Obtention de l'instance du journal
+        Journal journal = Journal:GetInstance()
+
+        // Exemples d'utilisation
+        journal:LogInfo("Application démarrée")
+        journal:LogDebug("Initialisation des composants")
+        journal:LogAvertissement("Espace disque faible")
+        journal:LogErreur("Échec de connexion à la base de données")
+
+        // Utilisation depuis un autre endroit du code
+        Journal autreAcces = Journal:GetInstance()
+        autreAcces:LogInfo("Test d'unicité du Singleton")
+
+        // Affichage des statistiques
+        output "Nombre total d'entrées : " + journal:GetCompteurEntrees()
+        output "Dernier niveau utilisé : " + journal:GetDernierNiveau()
+    end
+end
+```
+
+### Points Clés
+1. **Instance Unique** : Utilisation du patron Singleton pour garantir une instance unique
+2. **Gestion des Ressources** : Rotation automatique des fichiers basée sur la taille
+3. **Format Standard** : Format cohérent des entrées de journal
+4. **Niveaux de Log** : Support de différents niveaux de gravité
+5. **Robustesse** : Gestion des erreurs et des cas limites
+
+### Améliorations Possibles
+- Ajout de filtres de niveau de log
+- Support de plusieurs destinations de log
+- Compression des fichiers archivés
+- Configuration via un fichier externe
+
+## 2. Système de Plugins (Patron Fabrique)
+
+### Description
+Implémentation d'un système de plugins extensible utilisant le patron Fabrique pour la création dynamique de plugins.
+
+### Solution
+
+```quorum
+/*
+ * Système de plugins avec le patron Fabrique
+ * Permet l'ajout dynamique de nouvelles fonctionnalités
+ */
+
+// Interface de base pour tous les plugins
+interface Plugin
+    action GetNom returns text
+    action GetDescription returns text
+    action GetVersion returns text
+    action EstActif returns boolean
+    action Executer(text[] parametres)
+    action Initialiser
+    action Terminer
+end
+
+// Interface pour la configuration des plugins
+interface ConfigurationPlugin
+    action GetParametres returns text[]
+    action SetParametre(text nom, text valeur)
+    action GetParametre(text nom) returns text
+    action Valider returns boolean
+end
+
+// Classe de base pour les plugins
+class PluginBase is Plugin, ConfigurationPlugin
+    private text nom = ""
+    private text description = ""
+    private text version = "1.0"
+    private boolean actif = true
+    private HashMap<text, text> parametres
+
+    action PluginBase(text nom, text description)
+        me:nom = nom
+        me:description = description
+        parametres = new HashMap<text, text>()
+    end
+
+    // Implémentation de Plugin
+    action GetNom returns text
+        return nom
+    end
+
+    action GetDescription returns text
+        return description
+    end
+
+    action GetVersion returns text
+        return version
+    end
+
+    action EstActif returns boolean
+        return actif
+    end
+
+    action Initialiser
+        // Par défaut ne fait rien
+    end
+
+    action Terminer
+        // Par défaut ne fait rien
+    end
+
+    // Implémentation de ConfigurationPlugin
+    action GetParametres returns text[]
+        Array<text> cles
+        Iterator<text> it = parametres:GetKeyIterator()
+        repeat while it:HasNext()
+            cles:Add(it:Next())
+        end
+        return cles:ToArray()
+    end
+
+    action SetParametre(text nom, text valeur)
+        parametres:Add(nom, valeur)
+    end
+
+    action GetParametre(text nom) returns text
+        if parametres:HasKey(nom)
+            return parametres:GetValue(nom)
+        end
+        return undefined
+    end
+
+    action Valider returns boolean
+        // Par défaut valide
+        return true
+    end
+end
+
+// Fabrique de plugins
+class FabriquePlugins
+    private static HashMap<text, Plugin> plugins
+
+    action FabriquePlugins
+        plugins = new HashMap<text, Plugin>()
+        EnregistrerPluginsParDefaut()
+    end
+
+    private action EnregistrerPluginsParDefaut
+        // Plugins standard
+        EnregistrerPlugin(new PluginTraitementTexte())
+        EnregistrerPlugin(new PluginCompression())
+        EnregistrerPlugin(new PluginAnalyse())
+    end
+
+    public action EnregistrerPlugin(Plugin plugin)
+        plugins:Add(plugin:GetNom(), plugin)
+    end
+
+    public action CreerPlugin(text nom) returns Plugin
+        if plugins:HasKey(nom)
+            return plugins:GetValue(nom)
+        end
+        return undefined
+    end
+
+    public action GetPluginsDisponibles returns Array<Plugin>
+        Array<Plugin> listePlugins
+        Iterator<Plugin> it = plugins:GetValueIterator()
+        repeat while it:HasNext()
+            listePlugins:Add(it:Next())
+        end
+        return listePlugins
+    end
+end
+
+// Exemple de plugin de traitement de texte
+class PluginTraitementTexte is PluginBase
+    action PluginTraitementTexte
+        parent:PluginBase("TextProcessor", "Plugin de traitement de texte")
+        SetParametre("encodage", "UTF-8")
+        SetParametre("modeTraitement", "standard")
+    end
+
+    action Executer(text[] parametres)
+        // Implémentation spécifique
+    end
+end
+
+// Exemple de plugin de compression
+class PluginCompression is PluginBase
+    action PluginCompression
+        parent:PluginBase("Compressor", "Plugin de compression de fichiers")
+        SetParametre("niveau", "9")
+        SetParametre("algorithme", "gzip")
+    end
+
+    action Executer(text[] parametres)
+        // Implémentation spécifique
+    end
+end
+
+// Exemple de plugin d'analyse
+class PluginAnalyse is PluginBase
+    action PluginAnalyse
+        parent:PluginBase("Analyzer", "Plugin d'analyse de données")
+        SetParametre("profondeur", "3")
+        SetParametre("mode", "complet")
+    end
+
+    action Executer(text[] parametres)
+        // Implémentation spécifique
+    end
+end
+
+// Exemple d'utilisation du système de plugins
+class ExemplePlugins
+    action Main
+        // Création de la fabrique
+        FabriquePlugins fabrique = new FabriquePlugins()
+
+        // Affichage des plugins disponibles
+        Array<Plugin> plugins = fabrique:GetPluginsDisponibles()
+        output "Plugins disponibles :"
+
+        integer i = 0
+        repeat while i < plugins:GetSize()
+            Plugin plugin = plugins:Get(i)
+            output "- " + plugin:GetNom() + " (" + plugin:GetVersion() + ")"
+            output "  Description : " + plugin:GetDescription()
+
+            // Affichage des paramètres
+            text[] parametres = cast(ConfigurationPlugin, plugin):GetParametres()
+            if parametres:GetSize() > 0
+                output "  Paramètres :"
+                integer j = 0
+                repeat while j < parametres:GetSize()
+                    text param = parametres[j]
+                    text valeur = cast(ConfigurationPlugin, plugin):GetParametre(param)
+                    output "    " + param + " = " + valeur
+                    j = j + 1
+                end
+            end
+
+            output ""
+            i = i + 1
+        end
+
+        // Utilisation d'un plugin spécifique
+        Plugin plugin = fabrique:CreerPlugin("TextProcessor")
+        if plugin not= undefined and plugin:EstActif()
+            plugin:Initialiser()
+            plugin:Executer({"fichier.txt", "sortie.txt"})
+            plugin:Terminer()
+        end
+    end
+end
+```
+
+### Points Clés
+1. **Extensibilité** : Système facilement extensible avec de nouveaux plugins
+2. **Configuration** : Support de paramètres configurables par plugin
+3. **Cycle de Vie** : Gestion du cycle de vie des plugins (initialisation, exécution, terminaison)
+4. **Validation** : Validation des paramètres et de l'état des plugins
+5. **Découplage** : Séparation claire entre l'interface et l'implémentation
+
+### Améliorations Possibles
+- Chargement dynamique depuis des fichiers externes
+- Gestion des dépendances entre plugins
+- Système de version plus élaboré
+- Support d'activation/désactivation dynamique
