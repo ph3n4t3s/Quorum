@@ -97,5 +97,8 @@ end
 action Add(integer a, integer b) returns integer
     return a + b
 end
+action Main()
+    output Add(2,3) 
+end
 ```
 
