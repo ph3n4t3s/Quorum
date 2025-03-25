@@ -31,7 +31,7 @@ output nomComplet
 #### Saisir un nombre
 
 ```quorum
-text ageTexte = input("Entre ton âge : ") // Lecture d'un nombre au format texte
+text ageTexte = input("Entre ton âge : ") // Lecture d'un nombre en texte
 integer age = cast(integer, ageTexte) // Conversion explicite en entier
 output "Tu es né(e) soit en " + (2025 - age) + ", soit en " + (2024 - age)
 ```
